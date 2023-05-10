@@ -71,12 +71,14 @@ class DetectionRenderer:
         }
 
     def render_detections(
-        self, frame: PIL.Image.Image, detections: FrameDetections
+        self, frame: PIL.Image.Image, detections: FrameDetections, object_ids: int=-1, label_file_object_id: str=None, both_hand_objects_labels: bool=False
     ) -> PIL.Image.Image:
         """
         Args:
             frame: Frame to annotate with hand and object detections
             detections: Detections for the current frame
+            object_ids: Ids detected for the object in the right hand
+            label_file_object_id: path to the file containing Ids of objects
 
         Returns:
             A copy of ``frame`` annotated with the detections from ``detections``.
@@ -86,29 +88,66 @@ class DetectionRenderer:
         detections.scale(
             width_factor=self._img.width, height_factor=self._img.height
         )
-        if len(detections.hands) == 0 and len(detections.objects) == 0:
+        
+        if len(detections.hands) == 0 and self.only_interacted_objects:
             return self._img
+        
+        if len(detections.objects) != 0:
 
-        self._draw = ImageDraw.Draw(frame)
-        hand_object_idx_correspondences = detections.get_hand_object_interactions(
-            object_threshold=self.object_threshold, hand_threshold=self.hand_threshold
-        )
-        if not self.only_interacted_objects:
-            for object in detections.objects:
-                if object.score >= self.object_threshold:
-                    self._render_object(object)
+            self._draw = ImageDraw.Draw(frame)
+            hand_object_idx_correspondences = detections.get_hand_object_interactions(
+                object_threshold=self.object_threshold, hand_threshold=self.hand_threshold
+            )
+            if not self.only_interacted_objects:
+                for object in detections.objects:
+                    if object.score >= self.object_threshold:
+                        self._render_object(object)
+                        
+            
+            if object_ids != -1:
+                if both_hand_objects_labels:         
+                    interacting = detections.get_hand_object_interactions(0, 0, one_hand_side=True)
+                    labeled_object_right = [obj_idx for hand_idx, obj_idx in interacting.items() if detections.hands[hand_idx].side.value == HandSide.RIGHT.value]
+                    labeled_object_left = [obj_idx for hand_idx, obj_idx in interacting.items() if detections.hands[hand_idx].side.value == HandSide.LEFT.value]
+                    import json
+                    with open(label_file_object_id, 'r') as f:
+                        labels = json.load(f)
+                else:    
+                    interacting = detections.get_hand_object_interactions(0, 0, one_hand_side=True)
+                    labeled_object = [obj_idx for hand_idx, obj_idx in interacting.items() if detections.hands[hand_idx].side.value == HandSide.RIGHT.value]
+                    import json
+                    with open(label_file_object_id, 'r') as f:
+                        labels = json.load(f)
+            
 
-        for hand_idx, object_idx in hand_object_idx_correspondences.items():
-            hand = detections.hands[hand_idx]
-            object = detections.objects[object_idx]
-            if self.only_interacted_objects:
-                if object.score >= self.object_threshold:
-                    self._render_object(object)
-            self._render_hand_object_correspondence(hand, object)
-
-        for hand in detections.hands:
-            if hand.score >= self.hand_threshold:
-                self._render_hand(hand)
+            for hand_idx, object_idx in hand_object_idx_correspondences.items():
+                hand = detections.hands[hand_idx]
+                object = detections.objects[object_idx]
+                if self.only_interacted_objects:
+                    if object.score >= self.object_threshold:
+                        if object_ids != -1:
+                            if both_hand_objects_labels:
+                                if len(labeled_object_right) > 0 and detections.objects[labeled_object_right[0]].bbox == object.bbox:
+                                    label = str(labels[str(object_ids * 2)])
+                                elif len(labeled_object_left) > 0 and detections.objects[labeled_object_left[0]].bbox == object.bbox:
+                                    label = str(labels[str((object_ids * 2)+1)])
+                                else:
+                                    label = None
+                            else:
+                                if len(labeled_object) > 0 and detections.objects[labeled_object[0]].bbox == object.bbox:
+                                    label = str(labels[str(object_ids)])
+                                else:
+                                    label = None
+                        self._render_object(object, label)
+                self._render_hand_object_correspondence(hand, object)
+                
+            for hand in detections.hands:
+                if hand.score >= self.hand_threshold:
+                    self._render_hand(hand)
+        else:
+            for hand in detections.hands:
+                if hand.score >= self.hand_threshold:
+                    self._render_hand(hand)
 
         return self._img
 
@@ -132,7 +171,7 @@ class DetectionRenderer:
             outline_color=color,
         )
 
-    def _render_object(self, object: ObjectDetection):
+    def _render_object(self, object: ObjectDetection, label: str=None):
         mask = PIL.Image.new("RGBA", self._img.size)
         mask_draw = ImageDraw.Draw(mask)
         object_bbox = object.bbox.coords_int
@@ -142,11 +181,15 @@ class DetectionRenderer:
             width=self.border,
             fill=self.object_rgba,
         )
+        if label is not None:
+            text_im = f"O: {label}"
+        else:
+            text_im = "O"
         self._img.paste(mask, (0, 0), mask)
         self._render_label_box(
             ImageDraw.Draw(self._img),
             top_left=object.bbox.top_left_int,
-            text="O",
+            text=text_im,
             padding=self.text_padding,
             outline_color=self.object_rgb,
         )

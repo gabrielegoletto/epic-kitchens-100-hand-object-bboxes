@@ -274,7 +274,7 @@ class FrameDetections:
         return FrameDetections.from_protobuf(pb_detection)
 
     def get_hand_object_interactions(
-        self, object_threshold: float = 0, hand_threshold: float = 0
+        self, object_threshold: float = 0, hand_threshold: float = 0, one_hand_side: bool = False
     ) -> Dict[int, int]:
         """Match the hands to objects based on the hand offset vector that the model
         uses to predict the location of the interacted object.
@@ -307,7 +307,22 @@ class FrameDetections:
             )
             distances = ((object_centers - estimated_object_position) ** 2).sum(
                     axis=-1)
-            interactions[hand_idx] = object_idxs[cast(int, np.argmin(distances))]
+            if one_hand_side:
+                interactions[hand_idx] = (object_idxs[cast(int, np.argmin(distances))], hand_detection.side.value, hand_detection.score)
+            else:
+                interactions[hand_idx] = object_idxs[cast(int, np.argmin(distances))]
+        
+        if one_hand_side:
+            filtered_dict = {'left': None, 'right': None}
+            for hand_idx, (obj_idx, side, score) in interactions.items():
+                if side == HandSide.LEFT.value:
+                    if filtered_dict['left'] is None or filtered_dict['left'][1] < score:
+                        filtered_dict['left'] = (hand_idx, obj_idx)
+                elif side == HandSide.RIGHT.value:
+                    if filtered_dict['right'] is None or filtered_dict['right'][1] < score:
+                        filtered_dict['right'] = (hand_idx, obj_idx)
+            interactions = {v[0]: v[1] for v in filtered_dict.values() if v is not None}
+                    
         return interactions
 
     def scale(self, width_factor: float = 1, height_factor: float = 1) -> None:

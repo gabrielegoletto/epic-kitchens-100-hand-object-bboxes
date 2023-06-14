@@ -272,6 +272,12 @@ class FrameDetections:
         pb_detection = pb.Detections()
         pb_detection.MergeFromString(pb_str)
         return FrameDetections.from_protobuf(pb_detection)
+    
+    @staticmethod
+    def check_area(bbox) -> bool:
+        if (bbox.right-bbox.left)*(bbox.bottom-bbox.top) == 0:
+            return False
+        return True
 
     def get_hand_object_interactions(
         self, object_threshold: float = 0, hand_threshold: float = 0, one_hand_side: bool = False
@@ -315,6 +321,8 @@ class FrameDetections:
         if one_hand_side:
             filtered_dict = {'left': None, 'right': None}
             for hand_idx, (obj_idx, side, score) in interactions.items():
+                if not FrameDetections.check_area(self.hands[hand_idx].bbox) or not FrameDetections.check_area(self.objects[obj_idx].bbox):
+                    continue
                 if side == HandSide.LEFT.value:
                     if filtered_dict['left'] is None or filtered_dict['left'][1] < score:
                         filtered_dict['left'] = (hand_idx, obj_idx)

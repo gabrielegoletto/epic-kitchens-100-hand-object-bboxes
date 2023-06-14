@@ -71,7 +71,7 @@ class DetectionRenderer:
         }
 
     def render_detections(
-        self, frame: PIL.Image.Image, detections: FrameDetections, object_ids: int=-1, label_file_object_id: str=None, both_hand_objects_labels: bool=False
+        self, frame: PIL.Image.Image, detections: FrameDetections, object_ids: int=-1, label_file_object_id: str=None, both_hand_objects_labels: bool=False, single_hand: str='both'
     ) -> PIL.Image.Image:
         """
         Args:
@@ -122,6 +122,11 @@ class DetectionRenderer:
 
             for hand_idx, object_idx in hand_object_idx_correspondences.items():
                 hand = detections.hands[hand_idx]
+                if single_hand != 'both':
+                    hand_side = HandSide.LEFT if single_hand == 'left' else HandSide.RIGHT
+                    if hand.side.value != hand_side.value:
+                        continue
+                
                 object = detections.objects[object_idx]
                 if self.only_interacted_objects:
                     if object.score >= self.object_threshold:
@@ -142,6 +147,10 @@ class DetectionRenderer:
                 self._render_hand_object_correspondence(hand, object)
                 
             for hand in detections.hands:
+                if single_hand != 'both':
+                    hand_side = HandSide.LEFT if single_hand == 'left' else HandSide.RIGHT
+                    if hand.side.value != hand_side.value:
+                        continue
                 if hand.score >= self.hand_threshold:
                     self._render_hand(hand)
         else:

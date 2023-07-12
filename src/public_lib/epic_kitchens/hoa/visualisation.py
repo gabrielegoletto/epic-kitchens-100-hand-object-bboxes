@@ -89,15 +89,22 @@ class DetectionRenderer:
             width_factor=self._img.width, height_factor=self._img.height
         )
         
+        hand_det_over_thresh = len([el for el in detections.hands if el.score >= self.hand_threshold])
+        obj_det_over_thresh = len([el for el in detections.objects if el.score >= self.object_threshold])
+        
         if len(detections.hands) == 0 and self.only_interacted_objects:
             return self._img
         
         if len(detections.objects) != 0:
 
             self._draw = ImageDraw.Draw(frame)
-            hand_object_idx_correspondences = detections.get_hand_object_interactions(
-                object_threshold=self.object_threshold, hand_threshold=self.hand_threshold
-            )
+                        
+            if not(hand_det_over_thresh == 0 or obj_det_over_thresh == 0):
+                hand_object_idx_correspondences = detections.get_hand_object_interactions(
+                    object_threshold=self.object_threshold, hand_threshold=self.hand_threshold
+                )
+            else:  
+                hand_object_idx_correspondences = {}
             if not self.only_interacted_objects:
                 for object in detections.objects:
                     if object.score >= self.object_threshold:
@@ -130,6 +137,7 @@ class DetectionRenderer:
                 object = detections.objects[object_idx]
                 if self.only_interacted_objects:
                     if object.score >= self.object_threshold:
+                        label = None
                         if object_ids != -1:
                             if both_hand_objects_labels:
                                 if len(labeled_object_right) > 0 and detections.objects[labeled_object_right[0]].bbox == object.bbox:

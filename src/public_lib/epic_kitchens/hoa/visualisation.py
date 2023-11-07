@@ -1,5 +1,5 @@
 """Tools for visualising hand-object detections"""
-import os
+import os, json
 import warnings
 from copy import deepcopy
 from typing import Tuple
@@ -20,6 +20,8 @@ class DetectionRenderer:
         font_size=20,
         border=4,
         text_padding=4,
+        print_score=False,
+        fancy_video=None
     ):
         """
 
@@ -35,6 +37,14 @@ class DetectionRenderer:
         self.hand_threshold = hand_threshold
         self.object_threshold = object_threshold
         self.only_interacted_objects = only_interacted_objects
+        self.print_score = print_score
+        self.fancy_video = True if fancy_video is not None else False
+        if self.fancy_video:
+            with open(fancy_video[0], 'r') as json_file:
+                self.location_palette = json.load(json_file)
+            with open(fancy_video[1], 'r') as json_file:
+                self.object_palette = json.load(json_file)
+            
 
         try:
             self.font = ImageFont.truetype(
@@ -71,7 +81,7 @@ class DetectionRenderer:
         }
 
     def render_detections(
-        self, frame: PIL.Image.Image, detections: FrameDetections, object_ids: int=-1, label_file_object_id: str=None, both_hand_objects_labels: bool=False, single_hand: str='both'
+        self, frame: PIL.Image.Image, detections: FrameDetections, object_ids: int=-1, location_label: int=-1, label_file_object_id: str=None, both_hand_objects_labels: bool=False, single_hand: str='both', prob_back=False, pure_frame=False
     ) -> PIL.Image.Image:
         """
         Args:
@@ -84,6 +94,7 @@ class DetectionRenderer:
             A copy of ``frame`` annotated with the detections from ``detections``.
         """
         self._img = frame.copy()
+        prob = {}
         detections = self._detections = deepcopy(detections)
         detections.scale(
             width_factor=self._img.width, height_factor=self._img.height
@@ -92,35 +103,37 @@ class DetectionRenderer:
         hand_det_over_thresh = len([el for el in detections.hands if el.score >= self.hand_threshold])
         obj_det_over_thresh = len([el for el in detections.objects if el.score >= self.object_threshold])
         
-        if len(detections.hands) == 0 and self.only_interacted_objects:
+        if hand_det_over_thresh == 0 and self.only_interacted_objects:
+            if prob_back:
+                return self._img, prob
             return self._img
         
-        if len(detections.objects) != 0:
+        if obj_det_over_thresh != 0:
 
             self._draw = ImageDraw.Draw(frame)
                         
             if not(hand_det_over_thresh == 0 or obj_det_over_thresh == 0):
                 hand_object_idx_correspondences = detections.get_hand_object_interactions(
-                    object_threshold=self.object_threshold, hand_threshold=self.hand_threshold
+                    object_threshold=self.object_threshold, hand_threshold=self.hand_threshold, one_hand_side=True
                 )
             else:  
                 hand_object_idx_correspondences = {}
             if not self.only_interacted_objects:
                 for object in detections.objects:
-                    if object.score >= self.object_threshold:
+                    if object.score >= self.object_threshold and not pure_frame:
                         self._render_object(object)
                         
             
             if object_ids != -1:
                 if both_hand_objects_labels:         
-                    interacting = detections.get_hand_object_interactions(0, 0, one_hand_side=True)
+                    interacting = detections.get_hand_object_interactions(object_threshold=self.object_threshold, hand_threshold=self.hand_threshold, one_hand_side=True)
                     labeled_object_right = [obj_idx for hand_idx, obj_idx in interacting.items() if detections.hands[hand_idx].side.value == HandSide.RIGHT.value]
                     labeled_object_left = [obj_idx for hand_idx, obj_idx in interacting.items() if detections.hands[hand_idx].side.value == HandSide.LEFT.value]
                     import json
                     with open(label_file_object_id, 'r') as f:
                         labels = json.load(f)
                 else:    
-                    interacting = detections.get_hand_object_interactions(0, 0, one_hand_side=True)
+                    interacting = detections.get_hand_object_interactions(object_threshold=self.object_threshold, hand_threshold=self.hand_threshold, one_hand_side=True)
                     labeled_object = [obj_idx for hand_idx, obj_idx in interacting.items() if detections.hands[hand_idx].side.value == HandSide.RIGHT.value]
                     import json
                     with open(label_file_object_id, 'r') as f:
@@ -151,8 +164,17 @@ class DetectionRenderer:
                                     label = str(labels[str(object_ids)])
                                 else:
                                     label = None
-                        self._render_object(object, label)
-                self._render_hand_object_correspondence(hand, object)
+                        if hand.side.name == 'LEFT':
+                            prob['left_obj'] = object.score
+                        else:
+                            prob['right_obj'] = object.score
+                        if self.fancy_video or pure_frame:
+                            if label is not None and not pure_frame:
+                                self._render_object_fancy(object, label, location_label)
+                        else:
+                            self._render_object(object, label)
+                if not self.fancy_video and not pure_frame:
+                    self._render_hand_object_correspondence(hand, object)
                 
             for hand in detections.hands:
                 if single_hand != 'both':
@@ -160,12 +182,26 @@ class DetectionRenderer:
                     if hand.side.value != hand_side.value:
                         continue
                 if hand.score >= self.hand_threshold:
-                    self._render_hand(hand)
-        else:
+                    if prob_back:
+                        if hand.side.name == 'LEFT':
+                            prob['left_hand'] = hand.score
+                        else:
+                            prob['right_hand'] = hand.score
+                    if not self.fancy_video and not pure_frame:
+                        self._render_hand(hand)
+                    
+        elif not self.only_interacted_objects:
             for hand in detections.hands:
                 if hand.score >= self.hand_threshold:
-                    self._render_hand(hand)
+                    if hand.side.name == 'LEFT':
+                        prob['left_hand'] = hand.score
+                    else:
+                        prob['right_hand'] = hand.score
+                    if not self.fancy_video and not pure_frame:
+                        self._render_hand(hand)
 
+        if prob_back:
+            return self._img, prob
         return self._img
 
     def _render_hand(self, hand: HandDetection):
@@ -180,10 +216,13 @@ class DetectionRenderer:
             fill=self.hand_rgba[hand.side.name],
         )
         self._img.paste(mask, (0, 0), mask)
+        text_im=f"{self.side2human[hand.side.name]}-{self.state2human[hand.state.name]}"
+        if self.print_score:
+            text_im += f" {hand.score:.2f}"
         self._render_label_box(
             ImageDraw.Draw(self._img),
             top_left=hand.bbox.top_left_int,
-            text=f"{self.side2human[hand.side.name]}-{self.state2human[hand.state.name]}",
+            text=text_im,
             padding=self.text_padding,
             outline_color=color,
         )
@@ -202,6 +241,8 @@ class DetectionRenderer:
             text_im = f"O: {label}"
         else:
             text_im = "O"
+        if self.print_score:
+            text_im += f" {object.score:.2f}"
         self._img.paste(mask, (0, 0), mask)
         self._render_label_box(
             ImageDraw.Draw(self._img),
@@ -210,6 +251,25 @@ class DetectionRenderer:
             padding=self.text_padding,
             outline_color=self.object_rgb,
         )
+        
+    def _render_object_fancy(self, object: ObjectDetection, label: str=None, location_label: int=-1):
+        mask = PIL.Image.new("RGBA", self._img.size)
+        mask_draw = ImageDraw.Draw(mask)
+        object_bbox = object.bbox.coords_int
+        color = tuple([int(255*x) for x in self.object_palette[int(label)]])
+        mask_draw.rectangle(
+            object_bbox,
+            outline=color,
+            width=self.border,
+            fill=(*color, 70),
+        )
+        if int(location_label) != -1:
+            color_loc = tuple([int(255*x) for x in self.location_palette[int(location_label)]])
+            mask_draw.rectangle(
+                [0, 0, self._img.size[0], self._img.size[1]],
+                outline=color_loc,
+                width=self.border*2)
+        self._img.paste(mask, (0, 0), mask)
 
     def _render_hand_object_correspondence(
         self, hand: HandDetection, object: ObjectDetection

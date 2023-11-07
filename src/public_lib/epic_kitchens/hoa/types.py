@@ -324,11 +324,11 @@ class FrameDetections:
                 if not FrameDetections.check_area(self.hands[hand_idx].bbox) or not FrameDetections.check_area(self.objects[obj_idx].bbox):
                     continue
                 if side == HandSide.LEFT.value:
-                    if filtered_dict['left'] is None or filtered_dict['left'][1] < score:
-                        filtered_dict['left'] = (hand_idx, obj_idx)
+                    if filtered_dict['left'] is None or filtered_dict['left'][2] < score:
+                        filtered_dict['left'] = (hand_idx, obj_idx, score)
                 elif side == HandSide.RIGHT.value:
-                    if filtered_dict['right'] is None or filtered_dict['right'][1] < score:
-                        filtered_dict['right'] = (hand_idx, obj_idx)
+                    if filtered_dict['right'] is None or filtered_dict['right'][2] < score:
+                        filtered_dict['right'] = (hand_idx, obj_idx, score)
             interactions = {v[0]: v[1] for v in filtered_dict.values() if v is not None}
                     
         return interactions
